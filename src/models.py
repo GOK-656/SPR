@@ -16,6 +16,7 @@ from kornia.filters import GaussianBlur2d
 import copy
 import wandb
 from rlpyt.diff import Diffeo
+from collections import deque
 
 
 class SPRCatDqnModel(torch.nn.Module):
@@ -177,6 +178,9 @@ class SPRCatDqnModel(torch.nn.Module):
         self.target_augmentation = target_augmentation
         self.eval_augmentation = eval_augmentation
         self.num_actions = output_size
+
+        self.past_q = [deque([0], maxlen=10) for _ in range(10)]
+        self.aug_idx = 0
 
         if dueling:
             self.head = DQNDistributionalDuelingHeadModel(self.hidden_size,
@@ -425,6 +429,12 @@ class SPRCatDqnModel(torch.nn.Module):
                                                         alpha=(alpha, alpha), 
                                                         p=random_p, 
                                                         same_on_batch=False, keepdim=True)
+                elif type(transform) == list:
+                    if np.random.rand() < 0.6:
+                        self.aug_idx = np.argmax(np.mean(self.past_q, axis=1))
+                    else:
+                        self.aug_idx = np.random.randint(10)
+                    transform = transform[self.aug_idx]
                 image = maybe_transform(image, transform,
                                         eval_transform, p=self.aug_prob)
         return image
@@ -532,6 +542,9 @@ class SPRCatDqnModel(torch.nn.Module):
                 spr_loss = self.do_spr_loss(pred_latents, observation)
             else:
                 spr_loss = torch.zeros((self.jumps + 1, observation.shape[1]), device=latent.device)
+
+            if type(self.transforms[0]) == list:
+                self.past_q[self.aug_idx].append(pred_reward[0].mean().item())
 
             return log_pred_ps, pred_reward, spr_loss
 
