@@ -11,9 +11,11 @@ from kornia.augmentation import RandomAffine,\
     CenterCrop, \
     RandomResizedCrop, \
     RandomElasticTransform
+from kornia.augmentation.container import AugmentationSequential
 from kornia.filters import GaussianBlur2d
 import copy
 import wandb
+from rlpyt.diff import Diffeo
 
 
 class SPRCatDqnModel(torch.nn.Module):
@@ -101,8 +103,47 @@ class SPRCatDqnModel(torch.nn.Module):
             elif aug == "intensity":
                 transformation = Intensity(scale=0.05)
                 eval_transformation = nn.Identity()
-            elif aug == "elastictransform":
-                transformation = RandomElasticTransform(kernel_size=(31, 31), p=1., same_on_batch=False, keepdim=True)
+            elif aug.startswith('elastictransform_'):
+                params = aug.split('_')
+                kernel = int(params[1])
+                alpha = float(params[2])
+                transformation = RandomElasticTransform(kernel_size=(kernel, kernel), alpha=(alpha, alpha), p=1., same_on_batch=False, keepdim=True)
+                eval_transformation = nn.Identity()
+            elif aug.startswith('et+shift_'):
+                params = aug.split('_')
+                kernel = int(params[1])
+                sigma = float(params[2])
+                alpha = float(params[3])
+                prob = float(params[4])
+                et = RandomElasticTransform(kernel_size=(kernel, kernel), 
+                                                        sigma=(sigma, sigma),
+                                                        alpha=(alpha, alpha), 
+                                                        p=prob, 
+                                                        same_on_batch=False, keepdim=True)
+                shift = nn.Sequential(nn.ReplicationPad2d(4), RandomCrop((84, 84)))
+                transformation = AugmentationSequential(et, shift)
+                eval_transformation = nn.Identity()
+            elif aug.startswith('et_'):
+                params = aug.split('_')
+                kernel = int(params[1])
+                sigma = float(params[2])
+                alpha = float(params[3])
+                prob = float(params[4])
+                transformation = RandomElasticTransform(kernel_size=(kernel, kernel), 
+                                                        sigma=(sigma, sigma),
+                                                        alpha=(alpha, alpha), 
+                                                        p=prob, 
+                                                        same_on_batch=False, keepdim=True)
+                eval_transformation = nn.Identity()
+            elif aug.startswith('random_et_'):
+                params = aug.split('_')
+                kernel = int(params[2])
+                sigma = float(params[3])
+                alpha = float(params[4])
+                transformation = (kernel, sigma, alpha)
+                eval_transformation = nn.Identity()
+            elif aug == "diffeo":
+                transformation = Diffeo()
                 eval_transformation = nn.Identity()
             elif aug == "none":
                 transformation = eval_transformation = nn.Identity()
@@ -376,6 +417,14 @@ class SPRCatDqnModel(torch.nn.Module):
                 image = transform(image)
         else:
             for transform, eval_transform in zip(transforms, eval_transforms):
+                if type(transform) == tuple:
+                    kernel, sigma, alpha = transform
+                    random_p = np.random.choice([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0])
+                    transform = RandomElasticTransform(kernel_size=(kernel, kernel), 
+                                                        sigma=(sigma, sigma),
+                                                        alpha=(alpha, alpha), 
+                                                        p=random_p, 
+                                                        same_on_batch=False, keepdim=True)
                 image = maybe_transform(image, transform,
                                         eval_transform, p=self.aug_prob)
         return image
@@ -441,10 +490,22 @@ class SPRCatDqnModel(torch.nn.Module):
             pred_reward = []
             pred_latents = []
             input_obs = observation[0].flatten(1, 2)
+            # import torchvision.utils as vutils
+            # import matplotlib.pyplot as plt
+            # print(type(input_obs), input_obs.shape)
+            # inputt = torch.tensor(input_obs, dtype=torch.float32)
+            # plt.imsave(wandb.run.dir+'/input.png',np.ascontiguousarray(np.transpose(vutils.make_grid(inputt.to('cuda'), padding=2, normalize=True).cpu().numpy(),(1,2,0))))
+            
             input_obs = self.transform(input_obs, augment=True)
+            # print(type(input_obs), input_obs.shape)
+            # plt.imsave(wandb.run.dir+'/elastictransform_15.png',np.ascontiguousarray(np.transpose(vutils.make_grid(input_obs.to('cuda'), padding=2, normalize=True).cpu().numpy(),(1,2,0))))
+            # # <class 'torch.Tensor'> torch.Size([32, 4, 84, 84])
+            # raise NotImplementedError
             latent = self.stem_forward(input_obs,
                                        prev_action[0],
                                        prev_reward[0])
+            # print(type(latent), latent.shape)
+            # raise NotImplementedError
             log_pred_ps.append(self.head_forward(latent,
                                                  prev_action[0],
                                                  prev_reward[0],
@@ -486,6 +547,8 @@ class SPRCatDqnModel(torch.nn.Module):
             lead_dim, T, B, img_shape = infer_leading_dims(img, 3)
 
             conv_out = self.conv(img.view(T * B, *img_shape))  # Fold if T dimension.
+            # print(type(conv_out), conv_out.shape)
+            # raise NotImplementedError
             if self.renormalize:
                 conv_out = renormalize(conv_out, -3)
             p = self.head(conv_out)

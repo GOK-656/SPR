@@ -110,3 +110,7 @@ tmp/
 wandb
 philly/
 results/
+
+saved_exps/
+output/
+Roms/

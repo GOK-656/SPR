@@ -111,6 +111,9 @@ class SPRCategoricalDQN(CategoricalDQN):
             value=samples.agent.agent_info.p,
         )
 
+    # def eval_agent_invariance(self, ):
+        # Q
+
     def optimize_agent(self, itr, samples=None, sampler_itr=None):
         """
         Extracts the needed fields from input samples and stores them in the
@@ -126,6 +129,9 @@ class SPRCategoricalDQN(CategoricalDQN):
         opt_info = ModelOptInfo(*([] for _ in range(len(ModelOptInfo._fields))))
         if itr < self.min_itr_learn:
             return opt_info
+        # if itr % 1000 == 0:
+        #     samples_from_replay = self.replay_buffer.sample_batch(self.batch_size)
+
         for _ in range(self.updates_per_optimize):
             samples_from_replay = self.replay_buffer.sample_batch(self.batch_size)
             loss, td_abs_errors, model_rl_loss, reward_loss,\
