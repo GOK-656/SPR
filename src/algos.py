@@ -53,6 +53,8 @@ class SPRCategoricalDQN(CategoricalDQN):
             self.rl_loss = self.dqn_rl_loss
         else:
             self.rl_loss = self.dist_rl_loss
+        
+        self.sum_reward = 0
 
     def initialize_replay_buffer(self, examples, batch_spec, async_=False):
         example_to_buffer = ModelSamplesToBuffer(
@@ -111,9 +113,6 @@ class SPRCategoricalDQN(CategoricalDQN):
             value=samples.agent.agent_info.p,
         )
 
-    # def eval_agent_invariance(self, ):
-        # Q
-
     def optimize_agent(self, itr, samples=None, sampler_itr=None):
         """
         Extracts the needed fields from input samples and stores them in the
@@ -124,6 +123,15 @@ class SPRCategoricalDQN(CategoricalDQN):
         """
         itr = itr if sampler_itr is None else sampler_itr  # Async uses sampler_itr.=
         if samples is not None:
+            self.sum_reward += samples.env.reward[0][0]
+            if samples.env.done:
+                self.model.update_transform(self.sum_reward)
+                self.sum_reward = 0
+            # print(type(samples))
+            # print(samples)
+            # print(samples.env.reward)
+            # print(samples.env.done)
+            # raise NotImplementedError
             samples_to_buffer = self.samples_to_buffer(samples)
             self.replay_buffer.append_samples(samples_to_buffer)
         opt_info = ModelOptInfo(*([] for _ in range(len(ModelOptInfo._fields))))

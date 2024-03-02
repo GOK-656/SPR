@@ -15,7 +15,7 @@ from kornia.augmentation.container import AugmentationSequential
 from kornia.filters import GaussianBlur2d
 import copy
 import wandb
-from rlpyt.diff import Diffeo
+# from rlpyt.diff import Diffeo
 from collections import deque
 
 
@@ -143,6 +143,13 @@ class SPRCatDqnModel(torch.nn.Module):
                 alpha = float(params[4])
                 transformation = (kernel, sigma, alpha)
                 eval_transformation = nn.Identity()
+            elif aug == 'auto_aug':
+                transformation = [RandomElasticTransform(kernel_size=(17, 17), 
+                                                        sigma=(48, 48),
+                                                        alpha=(1.2, 1.2), 
+                                                        p=prob*0.1, 
+                                                        same_on_batch=False, keepdim=True) for prob in range(1, 11)]
+                eval_transformation = nn.Identity()
             elif aug == "diffeo":
                 transformation = Diffeo()
                 eval_transformation = nn.Identity()
@@ -181,6 +188,8 @@ class SPRCatDqnModel(torch.nn.Module):
 
         self.past_q = [deque([0], maxlen=10) for _ in range(10)]
         self.aug_idx = 0
+        self.aug_t = 0
+        self.aug_counter = [1]*10
 
         if dueling:
             self.head = DQNDistributionalDuelingHeadModel(self.hidden_size,
@@ -415,6 +424,20 @@ class SPRCatDqnModel(torch.nn.Module):
                                       self.momentum_tau)
         return spr_loss
 
+    def update_transform(self, reward, c=10):
+        if type(self.transforms[0]) == list:
+            self.aug_t += 1
+            self.past_q[self.aug_idx].append(reward)
+            print(reward)
+            # print(self.past_q)
+            print([np.mean(dq) + c*np.sqrt(np.log(self.aug_t)/self.aug_counter[i]) for i, dq in enumerate(self.past_q)])
+            self.aug_idx = np.argmax([np.mean(dq) + c*np.sqrt(np.log(self.aug_t)/self.aug_counter[i]) for i, dq in enumerate(self.past_q)])
+            print(self.aug_idx)
+            # if np.random.rand() < 0.8:
+            #     self.aug_idx = np.argmax([np.mean(dq) for dq in self.past_q])
+            # else:
+            #     self.aug_idx = np.random.randint(10)
+
     def apply_transforms(self, transforms, eval_transforms, image):
         if eval_transforms is None:
             for transform in transforms:
@@ -430,10 +453,11 @@ class SPRCatDqnModel(torch.nn.Module):
                                                         p=random_p, 
                                                         same_on_batch=False, keepdim=True)
                 elif type(transform) == list:
-                    if np.random.rand() < 0.6:
-                        self.aug_idx = np.argmax(np.mean(self.past_q, axis=1))
-                    else:
-                        self.aug_idx = np.random.randint(10)
+                    # if np.random.rand() < 0.2:
+                    #     self.aug_idx = np.argmax([np.mean(dq) for dq in self.past_q])
+                    # else:
+                    #     self.aug_idx = np.random.randint(10)
+                    # print(self.aug_idx)
                     transform = transform[self.aug_idx]
                 image = maybe_transform(image, transform,
                                         eval_transform, p=self.aug_prob)
@@ -543,8 +567,11 @@ class SPRCatDqnModel(torch.nn.Module):
             else:
                 spr_loss = torch.zeros((self.jumps + 1, observation.shape[1]), device=latent.device)
 
-            if type(self.transforms[0]) == list:
-                self.past_q[self.aug_idx].append(pred_reward[0].mean().item())
+            # if type(self.transforms[0]) == list:
+            #     rd = np.array([item.cpu().detach().numpy() for item in pred_reward])
+            #     # print(rd)
+            #     self.past_q[self.aug_idx].append(rd.mean())
+            #     # print(self.past_q)
 
             return log_pred_ps, pred_reward, spr_loss
 
